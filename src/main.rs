@@ -5,7 +5,6 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use chrono::Local;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about="Vivado Project Setup Tool in Rust", long_about=None)]
