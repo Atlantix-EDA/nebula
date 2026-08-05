@@ -5,6 +5,15 @@ Cargo.lock
 test_*.tcl
 test_builds/
 
+# Vivado journal / log / run cruft
+vivado*.jou
+vivado*.log
+*.backup.jou
+*.backup.log
+vivado_pid*.str
+.Xil/
+usage_statistics_webtalk.*
+
 # OS files
 .DS_Store
 .vscode/

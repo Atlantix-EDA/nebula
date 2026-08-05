@@ -1,10 +1,10 @@
 [package]
 name = "nebula"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["James Bonanno <james@atlantixeng.com>"]
 description = "A template-driven FPGA build tool for generating Vivado TCL scripts"
-repository = "https://github.com/saturn77/nebula"
+repository = "https://github.com/Atlantix-EDA/nebula"
 license = "MIT OR Apache-2.0"
 keywords = ["fpga", "vivado", "tcl", "build-tool", "xilinx"]
 categories = ["command-line-utilities", "development-tools", "embedded"]
@@ -12,16 +12,14 @@ readme = "README.md"
 
 [dependencies]
 anyhow = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "color"] }
-
-
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-ron = "0.11.0"
 tera = "1.19"
 colored = "3.0.0"
 dirs = "6.0.0"
+# sv-tree: SystemVerilog dependency resolver (compiled in — nebula stays a
+# single self-contained binary). For a published build switch this to:
+#   sv-tree = { git = "https://github.com/Atlantix-EDA/sv-tree" }
+sv-tree = { path = "../atlantix/Rust/sv-tree" }
 
 [[bin]]
 name = "nebula"

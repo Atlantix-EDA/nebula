@@ -1,352 +1,145 @@
-
-
 <div align="center">
   <img src="./assets/nebula_logo.png" alt="Nebula Logo" width="200">
-  
-  **Ergonomic FPGA build tool using `.tclx` templates local to your source repository.**
 
-  [![Rust 2024](https://img.shields.io/badge/Rust%202024-6C757D.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+  **Template-driven FPGA build tool for Vivado — with automatic SystemVerilog dependency resolution.**
+
+  [![Rust](https://img.shields.io/badge/Rust-6C757D.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![SystemVerilog](https://img.shields.io/badge/SystemVerilog-IEEE--1800-blue?style=flat)](https://en.wikipedia.org/wiki/SystemVerilog)
 [![Vivado](https://img.shields.io/badge/Vivado-TCL-orange?style=flat&logo=xilinx)](https://www.xilinx.com/products/design-tools/vivado.html)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=flat)](LICENSE)
 </div>
 
+Nebula generates and runs a Vivado project from a single top module. You give it a top file, a part, and where your RTL lives; it figures out **which source files the design actually needs**, renders them into a Vivado TCL project, and (optionally) drives synthesis, implementation, and bitstream generation.
 
+## How it works
 
-Nebula generates Vivado TCL scripts from **template files (`.tclx`)** stored **in your project repository**. Compiled in Rust for maximum performance and reliability - install once, run anywhere with zero external dependencies.
+1. **Dependency resolution.** Nebula links [**sv-tree**](https://github.com/Atlantix-EDA/sv-tree) — its dependency-resolution engine — which parses your SystemVerilog with `sv-parser` and walks the design hierarchy from the top module, following module instantiations *and* package imports, to produce the exact set of required files. No hand-maintained file lists. sv-tree is compiled directly into nebula, so nebula remains a single self-contained binary with no runtime tool to install.
+2. **Template rendering.** The resolved file list, plus the part, constraints, IP, and any block-design TCL, is rendered into a Vivado TCL project via a [Tera](https://tera.netlify.app/) template.
+3. **Vivado.** Nebula runs the generated TCL in batch mode, optionally compiling and/or opening the GUI.
 
-
-
-
-
-## Key Concept
-
-**TCL Templates as `.tclx` files**: Your project contains a `.tclx` template file that defines how to build your FPGA design. This template stays **local to your source repository**, making your project self-contained and portable.
-
-**Table of Contents**
-- [Installation](#installation) 
-- [Quick Start](#quick-start)
-- [Template System](#template-system)
-- [Command Reference](#command-reference)
-- [Examples](#examples)
+The payoff: the files Vivado compiles always match what the RTL instantiates — change the design, and the build follows automatically.
 
 ## Installation
 
-Install the Nebula binary once, then use it with any project:
-
-**Prerequisites**: Rust 1.75+ (for Rust 2024 edition support)
+**Prerequisites:** Rust (stable). sv-tree is pulled in as a Cargo dependency — nothing else to install.
 
 ```bash
-# Build from source (recommended)
-cargo install --git https://github.com/saturn77/nebula .
+# Install from source
+cargo install --git https://github.com/Atlantix-EDA/nebula
 
 # Or clone and build locally
-git clone https://github.com/saturn77/nebula
+git clone https://github.com/Atlantix-EDA/nebula
 cd nebula
-cargo install --path .
+cargo build --release      # binary at target/release/nebula
 ```
 
-## Quick Start
+## Quick start
 
-Each FPGA project contains a **`.tclx` template file** that defines the build configuration:
+Point nebula at the top file and the root of your RTL:
 
 ```bash
-# Basic usage - template file is local to your source repo
-nebula --proj-name testProject \
-       --source-repo ~/hdl_projects/mycore \
-       --source-tclx basic-uart.tclx \
-       --target-dir ~/builds/testProject/ \
-       --open-gui
-
-# Generate and run Vivado in batch mode
-nebula --proj-name mydesign \
-       --source-repo ~/my_fpga_project \
-       --source-tclx design.tclx \
-       --target-dir ~/builds/mydesign \
-       --compile
-
-# Compile and then open GUI
-nebula --proj-name mydesign \
-       --source-repo ~/my_fpga_project \
-       --source-tclx design.tclx \
-       --target-dir ~/builds/mydesign \
-       --compile --open-gui
-
-# Just generate TCL script (no Vivado execution)
-nebula --proj-name demo \
-       --source-repo . \
-       --source-tclx basic.tclx \
-       --target-dir ./build \
-       --dry-run
+nebula \
+  --proj-name KINTEX_KU060 \
+  --top-file  hw/rtl/top/top_level_kintex.sv \
+  --source-dir hw/rtl \
+  --part xcku060-ffva1156-2-i \
+  --target-dir ~/builds/kintex
 ```
 
-## Template System
+To see what nebula resolves without generating a project, add `--list-files`:
 
-### What are `.tclx` files?
-
-`.tclx` files are **TCL templates** using [Tera](https://tera.netlify.app/) syntax (similar to Jinja2). They live **in your source repository** alongside your HDL code.
-
-**Example project structure:**
-```
-your-fpga-project/
-├── hw/
-│   ├── rtl/                # RTL source files
-│   │   ├── top_level.sv
-│   │   └── modules/
-│   ├── ip/                 # IP cores and block designs
-│   │   └── clk_wiz_0/
-│   ├── constraints/        # XDC constraint files
-│   │   └── pins.xdc
-│   └── configurations/     # Template files (multiple configs)
-│       ├── basic-uart.tclx # ← Your template file (local to repo)
-│       ├── zcu104-design.tclx # ← Another template
-│       └── vecheck-cmod-test.tclx # ← VeCheck test template
+```bash
+nebula --proj-name KINTEX_KU060 \
+       --top-file hw/rtl/top/top_level_kintex.sv \
+       --source-dir hw/rtl --part xcku060-ffva1156-2-i \
+       --target-dir ~/builds/kintex \
+       --list-files
 ```
 
-### Sample `.tclx` Template
+```
+[INFO] Resolving SystemVerilog dependencies via sv-tree...
+[INFO] Resolved 8 source files (5 unresolved)
 
-Note that `nebula` does not **glob** files - you must list each source file explicitly in your template. This is actually a core feature of `nebula` & it emphasizes a particular build philosophy. 
-
-Here's an example `.tclx` template for a basic design:
-
-```tcl
-#----------------------------------------------
-#  basic-uart.tclx
-#  "TCL eXtended" - TCL as a template file
-#  Vivado TCL script for building an FPGA project
-#  with UART communication and memory interface
-#----------------------------------------------
-#  Version History
-#  1.0.0 -- Generated by Nebula
-#----------------------------------------------
-
-#----------------------------------------------
-# Set the project name and the FPGA part here
-#----------------------------------------------
-set project_name {{proj_name}} 
-set fpga_part xc7z020clg400-1
-set origin_dir {{source_repo}}
-
-set_msg_config -id {[IP_Flow 19-3664]} -suppress 
-set_msg_config -id {[IP_Flow 19-4299]} -suppress 
-set_msg_config -id {[Board 49-26]} -suppress 
-
-#----------------------------------------------
-# Create project in target dir, then close+reopen using absolute path
-#----------------------------------------------
-set proj_dir  [file normalize {{target_dir}}]
-set proj_name {{proj_name}}
-set proj_xpr  [file normalize [file join $proj_dir "${proj_name}.xpr"]]
-
-# Create the project (this writes the .xpr to $proj_dir)
-create_project -part $fpga_part -force -name $proj_name -dir $proj_dir
-
-# Just close, no save_project (the .xpr exists from create_project)
-close_project
-
-# Sanity check
-if {![file exists $proj_xpr]} {
-    error "Expected project file not found after create_project: $proj_xpr"
-}
-
-# Reopen using absolute path
-open_project $proj_xpr
-
-#---------------------------------------------- 
-# Add Vivado Project constraint files here
-#----------------------------------------------
-read_xdc "$origin_dir/hw/constraints/main_pins.xdc"
-
-#----------------------------------------------
-# **RTL Sources**
-# Main SystemVerilog modules for the project
-#----------------------------------------------
-read_verilog -sv "$origin_dir/hw/rtl/top/PackageDefs.sv"
-read_verilog -sv "$origin_dir/hw/rtl/top/top_level.sv"
-set_property top top_level [current_fileset]
-
-#----------------------------------------------
-# **Clock and Reset**
-# Clock control and reset generation modules
-#----------------------------------------------
-read_verilog "$origin_dir/hw/rtl/clock_control/clock_manager.sv"
-read_verilog "$origin_dir/hw/rtl/clock_control/reset_generator.sv"
-
-#----------------------------------------------
-# **Communication Modules**
-# UART and external communication drivers
-#----------------------------------------------
-read_verilog "$origin_dir/hw/rtl/comms/uart_transmitter.sv"
-read_verilog "$origin_dir/hw/rtl/comms/uart_receiver.sv"
-read_verilog "$origin_dir/hw/rtl/comms/memory_interface.sv"
-
-#----------------------------------------------
-# **Peripheral Interfaces**
-# LED control, buttons, and external interfaces
-#----------------------------------------------
-read_verilog "$origin_dir/hw/rtl/peripherals/led_controller.sv"
-read_verilog "$origin_dir/hw/rtl/peripherals/button_debounce.sv"
-read_verilog "$origin_dir/hw/rtl/peripherals/gpio_interface.sv"
-
-#----------------------------------------------
-# **Synchronization**
-# Clock domain crossing and synchronization
-#----------------------------------------------
-read_verilog "$origin_dir/hw/rtl/sync/dual_flop_sync.sv"
-read_verilog "$origin_dir/hw/rtl/sync/edge_detector.sv"
-
-#----------------------------------------------
-# **Timers and Counters**
-# Timing modules for system control
-#----------------------------------------------
-read_verilog "$origin_dir/hw/rtl/timers/counter_module.sv"
-read_verilog "$origin_dir/hw/rtl/timers/watchdog_timer.sv"
-
-#===============================================
-# Block Diagram Creation 
-# Create the block diagram, then generate IPI
-#===============================================
-update_compile_order -fileset sources_1
-
-# Include block design if it exists
-if {[file exists "$origin_dir/hw/configurations/system_design.tcl"]} {
-    source $origin_dir/hw/configurations/system_design.tcl
-}
-
-#----------------------------------------------
-# Compile the design if requested
-#----------------------------------------------
-{% if compile == true -%}
-    puts "Starting Synthesis..."
-    launch_runs synth_1
-    wait_on_run synth_1
-
-    puts "Starting Implementation..."
-    launch_runs impl_1 -to_step route_design
-    wait_on_run impl_1
-
-    # Generate bitstream
-    launch_runs impl_1 -to_step write_bitstream
-    wait_on_run impl_1
-
-    # Save build artifacts
-    write_bitstream -force {{target_dir}}/{{proj_name}}_{{date_time}}.bit
-    puts "Bitstream saved: {{proj_name}}_{{date_time}}.bit"
-    
-    if {[get_debug_cores] != ""} {
-        write_debug_probes -force {{target_dir}}/{{proj_name}}_{{date_time}}.ltx
-        puts "Debug probes saved: {{proj_name}}_{{date_time}}.ltx"
-    }
-
-    # Generate reports
-    open_run impl_1
-    report_timing_summary -delay_type min_max -report_unconstrained -check_timing_verbose -max_paths 10 -input_pins -routable_nets -name timing_1
-    report_utilization -name utilization_1 
-{% endif -%}
-
-update_compile_order -fileset sources_1
-
-{% if open_gui -%}
-# Switch from batch to GUI and leave the project open
-start_gui
-{% endif -%}
+# Dependency resolution (sv-tree)
+  required files: 8
+    .../clock_control/system_clock_reset.sv
+    .../peripherals/led_control.sv
+    .../peripherals/user_inputs_sync.sv
+    .../synchronization/sync2ff.sv
+    .../timers/SystemPkg.sv
+    .../timers/counter_xy.sv
+    .../timers/reset_counter.sv
+    .../top/top_level_kintex.sv
+  unresolved (5) — supply as IP / primitive / block-design wrapper:
+    BUFG
+    IBUFDS
+    MMCME3_BASE
+    MMCME4_BASE
+    blazeSystem_wrapper
 ```
 
-## Command Reference
+Names nebula can't find in the source tree (Xilinx primitives, vendor IP, block-design wrappers generated outside the RTL) are **reported, not silently dropped** — supply them with `--ip` / `--include-tcl` as needed.
 
-### Core Command Structure
+## Command reference
 
 ```bash
 nebula [OPTIONS]
 ```
 
-**Required Options:**
-- `--proj-name <NAME>` - Project name for Vivado
-- `--source-repo <PATH>` - Path to your source repository
-- `--source-tclx <FILE>` - Template file (`.tclx`) in your source repo
-- `--target-dir <PATH>` - Where to create the Vivado project
+**Required**
 
-**Execution Options:**
-- `--open-gui` - Open Vivado GUI after generation
-- `--compile` - Run synthesis and implementation
-- `--dry-run` - Show generated TCL without running Vivado
+| Flag | Description |
+|------|-------------|
+| `--proj-name <NAME>` | Vivado project name |
+| `--target-dir <PATH>` | Where to create the Vivado project |
+| `--part <PART>` | FPGA part (e.g. `xcku060-ffva1156-2-i`) |
 
-**Optional:**
-- `--fpga-part <PART>` - Override FPGA part from template
-- `--board-part <PART>` - Override board part from template
-- `--top-module <NAME>` - Override top module name
+**Sources**
 
-### Template Variables
+| Flag | Description |
+|------|-------------|
+| `--top-file <FILE>` | Top-level `.sv`; enables automatic dependency resolution |
+| `--source-dir <DIR>` | Root(s) to search for dependencies (repeatable) |
+| `--constraints <FILE>` | XDC constraint file (repeatable) |
+| `--ip <FILE>` | Xilinx IP `.xci` to import (repeatable) |
+| `--include-tcl <FILE>` | Extra TCL to `source` — e.g. a block-design script (repeatable) |
+| `--elf-file <FILE>` | ELF for an embedded (MicroBlaze) processor |
 
-Your `.tclx` templates have access to these variables:
+**Execution**
 
-| Variable | Description | Source |
-|----------|-------------|--------|
-| `proj_name` | Project name | Command line |
-| `source_repo` | Source repository path | Command line |
-| `target_dir` | Build directory | Command line |
-| `source_tclx` | Template filename | Command line |
-| `fpga_part` | FPGA part number | Template default or CLI |
-| `board_part` | Board part | Template default or CLI |
-| `top_module` | Top module name | Template default or CLI |
-| `date_time` | Current timestamp | Auto-generated |
-| `compile` | Compilation flag | CLI option --compile |
-| `open_gui` | GUI launch flag | CLI option --open-gui |
+| Flag | Description |
+|------|-------------|
+| `--compile` | Run synthesis, implementation, and bitstream |
+| `--open-gui` | Open the Vivado GUI after the TCL runs |
+| `--list-files` | Print the resolved file set and exit (no Vivado) |
+| `--init-template` | Write a starter `Justfile` into the target directory |
 
-## Examples
+## Template variables
 
-### Example 1: UART Design
-```bash
-nebula --proj-name uartTest \
-       --source-repo ~/projects/mycore \
-       --source-tclx basic-uart.tclx \
-       --target-dir ~/builds/zync7020/uartTest \
-       --compile --open-gui
-```
+The bundled Tera template receives these:
 
-### Example 2: Simple FPGA Test
-```bash
-nebula --proj-name counterTest \
-       --source-repo ~/my_design \
-       --source-tclx basic-counter.tclx \
-       --target-dir ~/builds/test \
-       --fpga-part xc7a35tcsg324-1
-```
+| Variable | Description |
+|----------|-------------|
+| `proj_name` | Project name |
+| `part` | FPGA part |
+| `target_dir` | Build directory |
+| `origin_dir` | First `--source-dir` (backward-compatible alias) |
+| `source_dirs` | All `--source-dir` values |
+| `sv_files` | Resolved source files (from sv-tree) |
+| `sv_file_count` | Number of resolved files |
+| `constraints_files` | `--constraints` values |
+| `ip_files` | `--ip` values |
+| `include_tcl_files` | `--include-tcl` values |
+| `elf_path_file` | `--elf-file` value |
+| `compile` / `open_gui` | Execution flags |
 
-### Example 3: Dry Run (No Vivado execution)
-```bash
-nebula --proj-name designCheck \
-       --source-repo . \
-       --source-tclx my-design.tclx \
-       --target-dir ./build \
-       --dry-run
-```
+## Why Nebula
 
-This shows you the generated TCL script without running Vivado.
-
-## Why Nebula?
-
-**Powerful**: Compiled Rust binary - blazing fast execution and rock-solid reliability  
-**Zero Dependencies**: Single executable, no Python/Node.js runtime required  
-**Self-contained**: Templates live with your source code  
-**Simple**: Install once, configure locally in your repo  
-**Flexible**: Tera templating for complex build logic  
-**Reproducible**: Same inputs = same Vivado project
+- **No manual file lists.** The build set is derived from the source, so it can't drift out of sync with the RTL.
+- **Single binary.** Rust, self-contained, sv-tree compiled in — no Python/Node runtime, no external tools.
+- **Reproducible.** Same inputs → same Vivado project.
+- **Composable.** Constraints, IP, and block-design TCL are wired in through explicit flags.
 
 ---
 
-### Get Started in 30 Seconds
-
-1. **Install Nebula** (one time):
-   ```bash
-   cargo install --git https://github.com/saturn77/nebula .
-   ```
-
-2. **Add a `.tclx` template** to your FPGA project
-
-3. **Run it**:
-   ```bash
-   nebula --proj-name mytest --source-repo . --source-tclx design.tclx --target-dir ./build --open-gui
-   ```
-
-*Your template. Your repo. Your build.*
+*Point it at your top. Nebula finds the rest.*
