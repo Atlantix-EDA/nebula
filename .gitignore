@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 
 # Test outputs
 test_*.tcl

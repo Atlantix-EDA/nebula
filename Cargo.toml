@@ -17,9 +17,11 @@ tera = "1.19"
 colored = "3.0.0"
 dirs = "6.0.0"
 # sv-tree: SystemVerilog dependency resolver (compiled in — nebula stays a
-# single self-contained binary). For a published build switch this to:
-#   sv-tree = { git = "https://github.com/Atlantix-EDA/sv-tree" }
-sv-tree = { path = "../atlantix/Rust/sv-tree" }
+# single self-contained binary). Cargo.lock pins the exact commit; for
+# local sv-tree hacking, temporarily override with:
+#   [patch."https://github.com/Atlantix-EDA/sv-tree"]
+#   sv-tree = { path = "../atlantix/Rust/sv-tree" }
+sv-tree = { git = "https://github.com/Atlantix-EDA/sv-tree" }
 
 [[bin]]
 name = "nebula"
